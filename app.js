@@ -20,20 +20,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- WebRTC Core ---
-function initPeer(role) {
+async function initPeer(role) {
     pc = new RTCPeerConnection(CONFIG);
 
+    // This part ensures the QR code shows even if ICE gathering is slow
     pc.onicecandidate = (e) => {
         if (!e.candidate) {
-            const sdp = btoa(JSON.stringify(pc.localDescription));
-            if (role === 'host') {
-                const url = `${BASE_URL}?data=${sdp}`;
-                generateQR('qrcode-host', url);
-                document.getElementById('host-code-out').value = sdp;
-            } else {
-                generateQR('qrcode-guest', sdp);
-                document.getElementById('guest-code-out').value = sdp;
-            }
+            console.log("ICE Gathering Complete");
+            updateUIWithCode(role);
         }
     };
 
@@ -42,13 +36,29 @@ function initPeer(role) {
     }
 }
 
+// Function to generate the string and QR
+function updateUIWithCode(role) {
+    if (!pc.localDescription) return;
+    
+    const sdp = btoa(JSON.stringify(pc.localDescription));
+    if (role === 'host') {
+        const url = `${BASE_URL}?data=${sdp}`;
+        generateQR('qrcode-host', url);
+        document.getElementById('host-code-out').value = sdp;
+    } else {
+        generateQR('qrcode-guest', sdp);
+        document.getElementById('guest-code-out').value = sdp;
+    }
+}
+
 function setupDataChannel(chan) {
     dataChannel = chan;
     dataChannel.onopen = () => {
         showScreen('chat-screen');
-        window.history.replaceState({}, null, BASE_URL); // Clear URL
+        window.history.replaceState({}, null, BASE_URL); 
     };
     dataChannel.onmessage = (e) => appendMessage(JSON.parse(e.data), 'received');
+    dataChannel.onclose = () => alert("Peer disconnected.");
 }
 
 // --- Host Logic ---
@@ -57,12 +67,15 @@ async function startHost() {
     showScreen('connection-screen');
     document.getElementById('host-setup').classList.remove('hidden');
     
-    initPeer('host');
+    await initPeer('host');
     dataChannel = pc.createDataChannel("chat");
     setupDataChannel(dataChannel);
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+
+    // FORCE DISPLAY after 1 second even if ICE isn't finished
+    setTimeout(() => updateUIWithCode('host'), 1000);
 }
 
 document.getElementById('btn-goto-scan-answer').onclick = () => {
@@ -76,8 +89,11 @@ async function hostProcessManual(manualCode = null) {
     if (!code) return;
     try {
         const answer = JSON.parse(atob(code));
-        await pc.setRemoteDescription(answer);
-    } catch(e) { alert("Invalid Code"); }
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    } catch(e) { 
+        console.error(e);
+        alert("Invalid Answer Code. Make sure you copied the whole string."); 
+    }
 }
 
 // --- Guest Logic ---
@@ -105,13 +121,19 @@ async function processOffer(encodedSdp) {
     document.getElementById('guest-scan-step').classList.add('hidden');
     document.getElementById('guest-answer-step').classList.remove('hidden');
     
-    initPeer('guest');
+    await initPeer('guest');
     try {
         const offer = JSON.parse(atob(encodedSdp));
-        await pc.setRemoteDescription(offer);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-    } catch(e) { alert("Invalid Offer Code"); }
+
+        // FORCE DISPLAY after 1 second
+        setTimeout(() => updateUIWithCode('guest'), 1000);
+    } catch(e) { 
+        console.error(e);
+        alert("Invalid Host Code."); 
+    }
 }
 
 // --- UI Utilities ---
@@ -122,29 +144,38 @@ function showScreen(id) {
 
 function generateQR(elId, text) {
     const el = document.getElementById(elId);
-    el.innerHTML = "";
-    new QRCode(el, { text: text, width: 180, height: 180 });
+    el.innerHTML = ""; // Clear existing
+    new QRCode(el, {
+        text: text,
+        width: 200,
+        height: 200,
+        correctLevel: QRCode.CorrectLevel.L // Low correction = simpler QR = easier to scan
+    });
 }
 
 let html5QrCode;
-function startScanner(elId, callback) {
+async function startScanner(elId, callback) {
+    if (html5QrCode) { await html5QrCode.stop().catch(()=>{}); }
     html5QrCode = new Html5Qrcode(elId);
     html5QrCode.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: 250 },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
         (text) => {
             html5QrCode.stop();
             callback(text);
         }
-    ).catch(err => alert("Camera error: " + err));
+    ).catch(err => {
+        console.error(err);
+        alert("Camera not found or permission denied.");
+    });
 }
 
 function sendMessage() {
     const msgInput = document.getElementById('msg-input');
     const val = msgInput.value.trim();
-    if (!val || !dataChannel) return;
+    if (!val || !dataChannel || dataChannel.readyState !== "open") return;
 
-    const msg = { text: val, time: new Date().toLocaleTimeString() };
+    const msg = { text: val, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
     dataChannel.send(JSON.stringify(msg));
     appendMessage(msg, 'sent');
     msgInput.value = "";
@@ -154,7 +185,7 @@ function appendMessage(msg, type) {
     const chat = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = `msg ${type}`;
-    div.innerHTML = `<div>${msg.text}</div><div style="font-size:9px; opacity:0.6">${msg.time}</div>`;
+    div.innerHTML = `<div>${msg.text}</div><div style="font-size:9px; opacity:0.6; margin-top:4px">${msg.time}</div>`;
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
@@ -162,6 +193,10 @@ function appendMessage(msg, type) {
 function copyToClipboard(id) {
     const input = document.getElementById(id);
     input.select();
+    input.setSelectionRange(0, 99999);
     navigator.clipboard.writeText(input.value);
-    alert("Code copied!");
+    const btn = input.nextElementSibling;
+    const oldText = btn.innerText;
+    btn.innerText = "Copied!";
+    setTimeout(() => btn.innerText = oldText, 2000);
 }
