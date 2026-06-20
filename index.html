@@ -2,97 +2,96 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ChatRex | P2P Nearby Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ChatRex | P2P Messenger</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- QR Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
 </head>
 <body class="light-mode">
     <div id="app">
         <!-- Welcome Screen -->
-        <section id="welcome-screen" class="active">
-            <div class="glass-card animated-fade-in">
-                <div class="logo"><i class="fas fa-bolt"></i></div>
+        <section id="welcome-screen" class="screen active">
+            <div class="glass-card">
+                <div class="logo"><i class="fas fa-shield-halved"></i></div>
                 <h1>ChatRex</h1>
-                <p>Secure, Serverless, Local Chat</p>
+                <p>Serverless P2P Chat</p>
                 <div class="button-group">
-                    <button id="btn-create-room" class="btn-primary">Create Room (Host)</button>
-                    <button id="btn-join-room" class="btn-secondary">Join Room (Scan)</button>
+                    <button id="btn-create-room" class="btn-primary">Host a Room</button>
+                    <button id="btn-join-room" class="btn-secondary">Join a Room</button>
                 </div>
             </div>
         </section>
 
-        <!-- Connection Workflow -->
-        <section id="connection-screen" class="hidden">
+        <!-- Connection Screen -->
+        <section id="connection-screen" class="screen hidden">
             <div class="glass-card">
-                <button class="btn-back" onclick="location.reload()"><i class="fas fa-arrow-left"></i></button>
-                <h2 id="conn-title">Signaling</h2>
+                <button class="btn-back" onclick="window.location.reload()"><i class="fas fa-arrow-left"></i></button>
                 
-                <!-- Host Step 1: Offer -->
-                <div id="step-1-offer" class="step hidden">
-                    <p class="small">Scan with Google Lens or ChatRex:</p>
-                    <div id="qrcode-container"></div>
+                <!-- HOST STEP 1 -->
+                <div id="host-setup" class="step hidden">
+                    <h3>Host: Step 1/2</h3>
+                    <p class="small">Ask your friend to scan this QR:</p>
+                    <div id="qrcode-host" class="qr-box"></div>
                     <div class="manual-box">
-                        <input type="text" id="manual-code-host" readonly>
-                        <button onclick="copyCode('manual-code-host')">Copy</button>
+                        <input type="text" id="host-code-out" readonly>
+                        <button onclick="copyToClipboard('host-code-out')">Copy</button>
                     </div>
                     <hr>
-                    <p class="small">Step 2: Scan your friend's Answer QR</p>
-                    <button id="btn-scan-answer" class="btn-primary">Scan Answer QR</button>
-                    <button onclick="showManualInput('answer')" class="btn-secondary">Enter Answer Manually</button>
+                    <button id="btn-goto-scan-answer" class="btn-primary">I've shared it, now scan Answer</button>
                 </div>
 
-                <!-- Guest Step 2: Join/Scan -->
-                <div id="step-2-join" class="step hidden">
-                    <div id="qr-reader" style="width: 100%;"></div>
-                    <div class="manual-entry-area">
-                        <p class="small">Or paste Host's Code:</p>
-                        <textarea id="manual-paste-host" placeholder="Paste code here..."></textarea>
-                        <button onclick="processManualOffer()" class="btn-primary">Connect Manually</button>
+                <!-- GUEST STEP 1 -->
+                <div id="guest-scan-step" class="step hidden">
+                    <h3>Guest: Scan Host</h3>
+                    <div id="reader-host"></div>
+                    <div class="manual-entry">
+                        <p class="small">Or paste Host's code:</p>
+                        <textarea id="guest-paste-host" placeholder="Paste Host Code..."></textarea>
+                        <button onclick="guestProcessManual()" class="btn-primary">Process Code</button>
                     </div>
                 </div>
 
-                <!-- Guest Step 3: Answer -->
-                <div id="step-3-answer" class="step hidden">
-                    <p class="small">Scan this with the Host's device:</p>
-                    <div id="qrcode-answer-container"></div>
+                <!-- GUEST STEP 2 -->
+                <div id="guest-answer-step" class="step hidden">
+                    <h3>Guest: Step 2/2</h3>
+                    <p class="small">Show this QR to the Host:</p>
+                    <div id="qrcode-guest" class="qr-box"></div>
                     <div class="manual-box">
-                        <input type="text" id="manual-code-guest" readonly>
-                        <button onclick="copyCode('manual-code-guest')">Copy</button>
+                        <input type="text" id="guest-code-out" readonly>
+                        <button onclick="copyToClipboard('guest-code-out')">Copy</button>
                     </div>
-                    <p class="status-msg">Waiting for Host to finalize...</p>
+                    <p class="loader">Waiting for Host to connect...</p>
                 </div>
 
-                <!-- Host Step 4: Finalize Manual -->
-                <div id="manual-answer-input" class="step hidden">
-                    <h3>Paste Answer Code</h3>
-                    <textarea id="manual-paste-answer" placeholder="Paste guest code here..."></textarea>
-                    <button onclick="processManualAnswer()" class="btn-primary">Finalize Connection</button>
+                <!-- HOST STEP 2 -->
+                <div id="host-scan-answer-step" class="step hidden">
+                    <h3>Host: Final Step</h3>
+                    <div id="reader-answer"></div>
+                    <div class="manual-entry">
+                        <p class="small">Or paste Guest's Answer:</p>
+                        <textarea id="host-paste-answer" placeholder="Paste Answer Code..."></textarea>
+                        <button onclick="hostProcessManual()" class="btn-primary">Finalize Connection</button>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- Chat Dashboard -->
-        <section id="chat-screen" class="hidden">
+        <!-- Chat Screen -->
+        <section id="chat-screen" class="screen hidden">
             <nav class="glass-nav">
-                <div class="user-info">
-                    <div class="status-dot online"></div>
-                    <span id="remote-username">Connected Peer</span>
+                <div class="status-info">
+                    <div class="dot"></div>
+                    <span>Peer Connected</span>
                 </div>
-                <div class="nav-actions">
-                    <button onclick="toggleTheme()"><i class="fas fa-moon"></i></button>
-                    <button class="danger" onclick="location.reload()"><i class="fas fa-times"></i></button>
-                </div>
+                <button onclick="window.location.reload()" class="btn-exit"><i class="fas fa-times"></i></button>
             </nav>
-
             <div id="chat-messages"></div>
-
             <div class="chat-input-area">
-                <input type="text" id="msg-input" placeholder="Type a message...">
-                <button id="btn-send" class="btn-send"><i class="fas fa-paper-plane"></i></button>
+                <input type="text" id="msg-input" placeholder="Message...">
+                <button id="btn-send"><i class="fas fa-paper-plane"></i></button>
             </div>
         </section>
     </div>
