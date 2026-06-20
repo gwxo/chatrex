@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NearbyChat | P2P Messenger</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- QR Code Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- QR Scanner Library -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body class="light-mode">
+    <div id="app">
+        <!-- Welcome Screen -->
+        <section id="welcome-screen" class="active">
+            <div class="glass-card animated-fade-in">
+                <div class="logo">
+                    <i class="fas fa-satellite-dish"></i>
+                </div>
+                <h1>NearbyChat</h1>
+                <p>Private. Serverless. Local.</p>
+                <div class="button-group">
+                    <button id="btn-create-room" class="btn-primary">Create Room</button>
+                    <button id="btn-join-room" class="btn-secondary">Join Room</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Connection Workflow (QR Exchange) -->
+        <section id="connection-screen" class="hidden">
+            <div class="glass-card">
+                <button class="btn-back"><i class="fas fa-arrow-left"></i></button>
+                <h2 id="conn-title">Signaling</h2>
+                
+                <div id="step-1-offer" class="step hidden">
+                    <p>Ask your friend to scan this QR code:</p>
+                    <div id="qrcode-container"></div>
+                    <p class="small">Waiting for answer scan...</p>
+                    <button id="btn-scan-answer" class="btn-primary">Scan their Answer QR</button>
+                </div>
+
+                <div id="step-2-join" class="step hidden">
+                    <div id="qr-reader" style="width: 100%;"></div>
+                    <p>Scan the Host's QR Code</p>
+                </div>
+
+                <div id="step-3-answer" class="step hidden">
+                    <p>Scan successful! Now show this QR to the Host:</p>
+                    <div id="qrcode-answer-container"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Chat Dashboard -->
+        <section id="chat-screen" class="hidden">
+            <nav class="glass-nav">
+                <div class="user-info">
+                    <div class="status-dot online"></div>
+                    <span id="remote-username">Peer</span>
+                </div>
+                <div class="nav-actions">
+                    <button id="btn-settings"><i class="fas fa-cog"></i></button>
+                    <button id="btn-disconnect" class="danger"><i class="fas fa-times"></i></button>
+                </div>
+            </nav>
+
+            <div id="chat-messages">
+                <!-- Messages dynamic load -->
+            </div>
+
+            <div id="typing-indicator" class="hidden">Peer is typing...</div>
+
+            <div class="chat-input-area">
+                <label for="file-input" class="icon-btn"><i class="fas fa-paperclip"></i></label>
+                <input type="file" id="file-input" hidden>
+                <input type="text" id="msg-input" placeholder="Type a message...">
+                <button id="btn-voice" class="icon-btn"><i class="fas fa-microphone"></i></button>
+                <button id="btn-send" class="btn-send"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </section>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <h3>Settings</h3>
+                <div class="setting-item">
+                    <label>Username</label>
+                    <input type="text" id="username-input" placeholder="Enter name">
+                </div>
+                <div class="setting-item">
+                    <label>Theme</label>
+                    <button id="theme-toggle" class="btn-secondary">Switch Theme</button>
+                </div>
+                <button id="close-settings" class="btn-primary">Save & Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
