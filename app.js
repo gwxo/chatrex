@@ -1,71 +1,66 @@
-// --- State Management ---
+const CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const BASE_URL = "https://chatrex.pages.dev/";
+
 const state = {
     pc: null,
     dataChannel: null,
     isHost: false,
-    username: localStorage.getItem('username') || 'Anonymous',
-    theme: localStorage.getItem('theme') || 'light'
-};
-
-// --- DOM Elements ---
-const screens = {
-    welcome: document.getElementById('welcome-screen'),
-    conn: document.getElementById('connection-screen'),
-    chat: document.getElementById('chat-screen')
-};
-
-const configuration = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    username: 'User_' + Math.floor(Math.random() * 1000)
 };
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
-    initTheme();
-    setupEventListeners();
-});
+    // Check for Google Lens / URL data
+    const urlParams = new URLSearchParams(window.location.search);
+    const remoteData = urlParams.get('data');
+    
+    if (remoteData) {
+        startGuest(remoteData);
+    }
 
-function setupEventListeners() {
     document.getElementById('btn-create-room').onclick = startHost;
-    document.getElementById('btn-join-room').onclick = startGuest;
+    document.getElementById('btn-join-room').onclick = () => startGuest();
     document.getElementById('btn-send').onclick = sendMessage;
-    document.getElementById('theme-toggle').onclick = toggleTheme;
-    document.getElementById('btn-settings').onclick = () => document.getElementById('settings-modal').classList.remove('hidden');
-    document.getElementById('close-settings').onclick = saveSettings;
-
-    // Handle "Enter" key in input
-    document.getElementById('msg-input').onkeypress = (e) => {
-        if(e.key === 'Enter') sendMessage();
-    };
-}
+    document.getElementById('msg-input').onkeydown = (e) => e.key === 'Enter' && sendMessage();
+});
 
 // --- WebRTC Logic ---
 
 async function createPeerConnection() {
-    state.pc = new RTCPeerConnection(configuration);
+    state.pc = new RTCPeerConnection(CONFIG);
 
-    state.pc.onicecandidate = (event) => {
-        if (!event.candidate) {
-            // ICE Gathering finished, generate QR
-            const sdpData = btoa(JSON.stringify(state.pc.localDescription));
-            displayQR(sdpData);
+    state.pc.onicecandidate = (e) => {
+        if (!e.candidate) {
+            const sdp = btoa(JSON.stringify(state.pc.localDescription));
+            if (state.isHost) {
+                const fullUrl = `${BASE_URL}?data=${sdp}`;
+                generateQR('qrcode-container', fullUrl);
+                document.getElementById('manual-code-host').value = sdp;
+            } else {
+                generateQR('qrcode-answer-container', sdp);
+                document.getElementById('manual-code-guest').value = sdp;
+            }
         }
     };
 
-    state.pc.ondatachannel = (event) => {
-        setupDataChannel(event.channel);
-    };
+    state.pc.ondatachannel = (e) => setupDataChannel(e.channel);
 }
 
 function setupDataChannel(channel) {
     state.dataChannel = channel;
-    state.dataChannel.onopen = () => onConnectionSuccess();
-    state.dataChannel.onmessage = (e) => handleIncomingMessage(JSON.parse(e.data));
+    state.dataChannel.onopen = () => {
+        showScreen('chat');
+        if (window.history.pushState) {
+            window.history.pushState({}, null, BASE_URL); // Clean URL
+        }
+    };
+    state.dataChannel.onmessage = (e) => appendMessage(JSON.parse(e.data), 'received');
 }
 
-// --- Hosting Workflow ---
+// --- Host Flow ---
 async function startHost() {
     state.isHost = true;
-    showScreen('conn');
+    showScreen('connection-screen');
     document.getElementById('step-1-offer').classList.remove('hidden');
     
     await createPeerConnection();
@@ -76,138 +71,103 @@ async function startHost() {
     await state.pc.setLocalDescription(offer);
 }
 
-// --- Joining Workflow ---
-function startGuest() {
+// --- Guest Flow ---
+async function startGuest(externalData = null) {
     state.isHost = false;
-    showScreen('conn');
-    document.getElementById('step-2-join').classList.remove('hidden');
-
-    const scanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 250 });
-    scanner.render(async (decodedText) => {
-        scanner.clear();
-        document.getElementById('step-2-join').classList.add('hidden');
-        await handleOfferScan(decodedText);
-    });
+    showScreen('connection-screen');
+    
+    if (externalData) {
+        handleOfferData(externalData);
+    } else {
+        document.getElementById('step-2-join').classList.remove('hidden');
+        initScanner("qr-reader", (text) => {
+            const data = text.includes('?data=') ? text.split('?data=')[1] : text;
+            handleOfferData(data);
+        });
+    }
 }
 
-async function handleOfferScan(encodedSdp) {
+async function handleOfferData(encodedSdp) {
+    document.getElementById('step-2-join').classList.add('hidden');
+    document.getElementById('step-3-answer').classList.remove('hidden');
+
     await createPeerConnection();
     const offer = JSON.parse(atob(encodedSdp));
     await state.pc.setRemoteDescription(offer);
     
     const answer = await state.pc.createAnswer();
     await state.pc.setLocalDescription(answer);
-    
-    document.getElementById('step-3-answer').classList.remove('hidden');
-    // QR will be generated by onicecandidate logic
 }
 
-// Host scans guest's answer
-document.getElementById('btn-scan-answer').onclick = () => {
+// --- Manual Actions ---
+function processManualOffer() {
+    const code = document.getElementById('manual-paste-host').value.trim();
+    if (code) handleOfferData(code);
+}
+
+function showManualInput(type) {
     document.getElementById('step-1-offer').classList.add('hidden');
-    document.getElementById('step-2-join').classList.remove('hidden');
-    
-    const scanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 250 });
-    scanner.render(async (decodedText) => {
-        scanner.clear();
-        const answer = JSON.parse(atob(decodedText));
+    document.getElementById('manual-answer-input').classList.remove('hidden');
+}
+
+async function processManualAnswer() {
+    const code = document.getElementById('manual-paste-answer').value.trim();
+    if (code) {
+        const answer = JSON.parse(atob(code));
         await state.pc.setRemoteDescription(answer);
-    });
-};
+    }
+}
 
-// --- Messaging Logic ---
-
+// --- Messaging ---
 function sendMessage() {
     const input = document.getElementById('msg-input');
-    const text = input.value.trim();
-    if (!text || !state.dataChannel) return;
+    if (!input.value.trim() || !state.dataChannel) return;
 
-    const msgObj = {
-        type: 'text',
-        content: text,
+    const msg = {
+        text: input.value,
         sender: state.username,
-        time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    state.dataChannel.send(JSON.stringify(msgObj));
-    appendMessage(msgObj, 'sent');
+    state.dataChannel.send(JSON.stringify(msg));
+    appendMessage(msg, 'sent');
     input.value = '';
-}
-
-function handleIncomingMessage(msg) {
-    if (msg.type === 'text') {
-        appendMessage(msg, 'received');
-        vibrateDevice();
-        playNotificationSound();
-    }
 }
 
 function appendMessage(msg, side) {
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = `message ${side}`;
-    div.innerHTML = `
-        <div class="msg-sender">${msg.sender}</div>
-        <div class="msg-content">${sanitize(msg.content)}</div>
-        <div class="msg-time">${msg.time}</div>
-    `;
+    div.innerHTML = `<div class="msg-text">${msg.text}</div><div style="font-size:10px; opacity:0.6; text-align:right">${msg.time}</div>`;
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
 }
 
-// --- Helpers ---
-
-function showScreen(screenKey) {
-    Object.values(screens).forEach(s => s.classList.remove('active', 'hidden'));
-    Object.keys(screens).forEach(key => {
-        if(key !== screenKey) screens[key].classList.add('hidden');
-    });
-    screens[screenKey].classList.add('active');
+// --- Utils ---
+function showScreen(id) {
+    document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+    document.getElementById(id).classList.remove('hidden');
 }
 
-function displayQR(data) {
-    const container = state.isHost ? 'qrcode-container' : 'qrcode-answer-container';
-    document.getElementById(container).innerHTML = "";
-    new QRCode(document.getElementById(container), {
-        text: data,
-        width: 256,
-        height: 256,
-        correctLevel: QRCode.CorrectLevel.L
+function generateQR(id, text) {
+    new QRCode(document.getElementById(id), { text: text, width: 200, height: 200 });
+}
+
+function initScanner(id, callback) {
+    const scanner = new Html5QrcodeScanner(id, { fps: 10, qrbox: 250 });
+    scanner.render((text) => {
+        scanner.clear();
+        callback(text);
     });
 }
 
-function onConnectionSuccess() {
-    showScreen('chat');
-    vibrateDevice();
-}
-
-function sanitize(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+function copyCode(id) {
+    const el = document.getElementById(id);
+    el.select();
+    navigator.clipboard.writeText(el.value);
+    alert("Code Copied!");
 }
 
 function toggleTheme() {
-    state.theme = state.theme === 'light' ? 'dark' : 'light';
-    document.body.className = state.theme + '-mode';
-    localStorage.setItem('theme', state.theme);
-}
-
-function initTheme() {
-    document.body.className = state.theme + '-mode';
-}
-
-function saveSettings() {
-    state.username = document.getElementById('username-input').value || 'Anonymous';
-    localStorage.setItem('username', state.username);
-    document.getElementById('settings-modal').classList.add('hidden');
-}
-
-function vibrateDevice() {
-    if ("vibrate" in navigator) navigator.vibrate(100);
-}
-
-function playNotificationSound() {
-    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
-    audio.play().catch(() => {});
+    document.body.classList.toggle('dark-mode');
 }
