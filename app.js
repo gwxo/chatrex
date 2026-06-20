@@ -1,173 +1,167 @@
 const CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-const BASE_URL = "https://chatrex.pages.dev/";
+const BASE_URL = window.location.origin + window.location.pathname;
 
-const state = {
-    pc: null,
-    dataChannel: null,
-    isHost: false,
-    username: 'User_' + Math.floor(Math.random() * 1000)
-};
+let pc, dataChannel;
+let isHost = false;
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Check for Google Lens / URL data
-    const urlParams = new URLSearchParams(window.location.search);
-    const remoteData = urlParams.get('data');
-    
-    if (remoteData) {
-        startGuest(remoteData);
+    const params = new URLSearchParams(window.location.search);
+    const data = params.get('data');
+
+    if (data) {
+        startGuest(data);
     }
 
     document.getElementById('btn-create-room').onclick = startHost;
     document.getElementById('btn-join-room').onclick = () => startGuest();
     document.getElementById('btn-send').onclick = sendMessage;
-    document.getElementById('msg-input').onkeydown = (e) => e.key === 'Enter' && sendMessage();
+    document.getElementById('msg-input').onkeypress = (e) => e.key === 'Enter' && sendMessage();
 });
 
-// --- WebRTC Logic ---
+// --- WebRTC Core ---
+function initPeer(role) {
+    pc = new RTCPeerConnection(CONFIG);
 
-async function createPeerConnection() {
-    state.pc = new RTCPeerConnection(CONFIG);
-
-    state.pc.onicecandidate = (e) => {
+    pc.onicecandidate = (e) => {
         if (!e.candidate) {
-            const sdp = btoa(JSON.stringify(state.pc.localDescription));
-            if (state.isHost) {
-                const fullUrl = `${BASE_URL}?data=${sdp}`;
-                generateQR('qrcode-container', fullUrl);
-                document.getElementById('manual-code-host').value = sdp;
+            const sdp = btoa(JSON.stringify(pc.localDescription));
+            if (role === 'host') {
+                const url = `${BASE_URL}?data=${sdp}`;
+                generateQR('qrcode-host', url);
+                document.getElementById('host-code-out').value = sdp;
             } else {
-                generateQR('qrcode-answer-container', sdp);
-                document.getElementById('manual-code-guest').value = sdp;
+                generateQR('qrcode-guest', sdp);
+                document.getElementById('guest-code-out').value = sdp;
             }
         }
     };
 
-    state.pc.ondatachannel = (e) => setupDataChannel(e.channel);
+    if (role === 'guest') {
+        pc.ondatachannel = (e) => setupDataChannel(e.channel);
+    }
 }
 
-function setupDataChannel(channel) {
-    state.dataChannel = channel;
-    state.dataChannel.onopen = () => {
-        showScreen('chat');
-        if (window.history.pushState) {
-            window.history.pushState({}, null, BASE_URL); // Clean URL
-        }
+function setupDataChannel(chan) {
+    dataChannel = chan;
+    dataChannel.onopen = () => {
+        showScreen('chat-screen');
+        window.history.replaceState({}, null, BASE_URL); // Clear URL
     };
-    state.dataChannel.onmessage = (e) => appendMessage(JSON.parse(e.data), 'received');
+    dataChannel.onmessage = (e) => appendMessage(JSON.parse(e.data), 'received');
 }
 
-// --- Host Flow ---
+// --- Host Logic ---
 async function startHost() {
-    state.isHost = true;
+    isHost = true;
     showScreen('connection-screen');
-    document.getElementById('step-1-offer').classList.remove('hidden');
+    document.getElementById('host-setup').classList.remove('hidden');
     
-    await createPeerConnection();
-    state.dataChannel = state.pc.createDataChannel("chat");
-    setupDataChannel(state.dataChannel);
+    initPeer('host');
+    dataChannel = pc.createDataChannel("chat");
+    setupDataChannel(dataChannel);
 
-    const offer = await state.pc.createOffer();
-    await state.pc.setLocalDescription(offer);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
 }
 
-// --- Guest Flow ---
-async function startGuest(externalData = null) {
-    state.isHost = false;
+document.getElementById('btn-goto-scan-answer').onclick = () => {
+    document.getElementById('host-setup').classList.add('hidden');
+    document.getElementById('host-scan-answer-step').classList.remove('hidden');
+    startScanner("reader-answer", (text) => hostProcessManual(text));
+};
+
+async function hostProcessManual(manualCode = null) {
+    const code = manualCode || document.getElementById('host-paste-answer').value.trim();
+    if (!code) return;
+    try {
+        const answer = JSON.parse(atob(code));
+        await pc.setRemoteDescription(answer);
+    } catch(e) { alert("Invalid Code"); }
+}
+
+// --- Guest Logic ---
+async function startGuest(autoData = null) {
+    isHost = false;
     showScreen('connection-screen');
     
-    if (externalData) {
-        handleOfferData(externalData);
+    if (autoData) {
+        processOffer(autoData);
     } else {
-        document.getElementById('step-2-join').classList.remove('hidden');
-        initScanner("qr-reader", (text) => {
+        document.getElementById('guest-scan-step').classList.remove('hidden');
+        startScanner("reader-host", (text) => {
             const data = text.includes('?data=') ? text.split('?data=')[1] : text;
-            handleOfferData(data);
+            processOffer(data);
         });
     }
 }
 
-async function handleOfferData(encodedSdp) {
-    document.getElementById('step-2-join').classList.add('hidden');
-    document.getElementById('step-3-answer').classList.remove('hidden');
+async function guestProcessManual() {
+    const code = document.getElementById('guest-paste-host').value.trim();
+    if (code) processOffer(code);
+}
 
-    await createPeerConnection();
-    const offer = JSON.parse(atob(encodedSdp));
-    await state.pc.setRemoteDescription(offer);
+async function processOffer(encodedSdp) {
+    document.getElementById('guest-scan-step').classList.add('hidden');
+    document.getElementById('guest-answer-step').classList.remove('hidden');
     
-    const answer = await state.pc.createAnswer();
-    await state.pc.setLocalDescription(answer);
+    initPeer('guest');
+    try {
+        const offer = JSON.parse(atob(encodedSdp));
+        await pc.setRemoteDescription(offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+    } catch(e) { alert("Invalid Offer Code"); }
 }
 
-// --- Manual Actions ---
-function processManualOffer() {
-    const code = document.getElementById('manual-paste-host').value.trim();
-    if (code) handleOfferData(code);
-}
-
-function showManualInput(type) {
-    document.getElementById('step-1-offer').classList.add('hidden');
-    document.getElementById('manual-answer-input').classList.remove('hidden');
-}
-
-async function processManualAnswer() {
-    const code = document.getElementById('manual-paste-answer').value.trim();
-    if (code) {
-        const answer = JSON.parse(atob(code));
-        await state.pc.setRemoteDescription(answer);
-    }
-}
-
-// --- Messaging ---
-function sendMessage() {
-    const input = document.getElementById('msg-input');
-    if (!input.value.trim() || !state.dataChannel) return;
-
-    const msg = {
-        text: input.value,
-        sender: state.username,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    state.dataChannel.send(JSON.stringify(msg));
-    appendMessage(msg, 'sent');
-    input.value = '';
-}
-
-function appendMessage(msg, side) {
-    const container = document.getElementById('chat-messages');
-    const div = document.createElement('div');
-    div.className = `message ${side}`;
-    div.innerHTML = `<div class="msg-text">${msg.text}</div><div style="font-size:10px; opacity:0.6; text-align:right">${msg.time}</div>`;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-}
-
-// --- Utils ---
+// --- UI Utilities ---
 function showScreen(id) {
-    document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+    document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
     document.getElementById(id).classList.remove('hidden');
 }
 
-function generateQR(id, text) {
-    new QRCode(document.getElementById(id), { text: text, width: 200, height: 200 });
+function generateQR(elId, text) {
+    const el = document.getElementById(elId);
+    el.innerHTML = "";
+    new QRCode(el, { text: text, width: 180, height: 180 });
 }
 
-function initScanner(id, callback) {
-    const scanner = new Html5QrcodeScanner(id, { fps: 10, qrbox: 250 });
-    scanner.render((text) => {
-        scanner.clear();
-        callback(text);
-    });
+let html5QrCode;
+function startScanner(elId, callback) {
+    html5QrCode = new Html5Qrcode(elId);
+    html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        (text) => {
+            html5QrCode.stop();
+            callback(text);
+        }
+    ).catch(err => alert("Camera error: " + err));
 }
 
-function copyCode(id) {
-    const el = document.getElementById(id);
-    el.select();
-    navigator.clipboard.writeText(el.value);
-    alert("Code Copied!");
+function sendMessage() {
+    const msgInput = document.getElementById('msg-input');
+    const val = msgInput.value.trim();
+    if (!val || !dataChannel) return;
+
+    const msg = { text: val, time: new Date().toLocaleTimeString() };
+    dataChannel.send(JSON.stringify(msg));
+    appendMessage(msg, 'sent');
+    msgInput.value = "";
 }
 
-function toggleTheme() {
-    document.body.classList.toggle('dark-mode');
+function appendMessage(msg, type) {
+    const chat = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = `msg ${type}`;
+    div.innerHTML = `<div>${msg.text}</div><div style="font-size:9px; opacity:0.6">${msg.time}</div>`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+function copyToClipboard(id) {
+    const input = document.getElementById(id);
+    input.select();
+    navigator.clipboard.writeText(input.value);
+    alert("Code copied!");
 }
